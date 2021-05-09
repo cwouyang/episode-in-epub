@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
     println!("Let's see what stories does {}({}) have ...", nickname, author_id);
     let stories = parse_stories(&about_page)?;
     let selected_story = ask_select_story(&stories)?;
-    println!("{:?}", selected_story);
+    parse_story(selected_story).await?;
 
     Ok(())
 }
@@ -118,4 +118,45 @@ fn ask_select_story(stories: &Vec<StoryInfo>) -> Result<&StoryInfo> {
             }
         };
     }
+}
+
+struct StoryPage {
+    page: usize,
+    content: String,
+    background: String,
+}
+
+struct Story(Vec<StoryPage>);
+
+async fn parse_story(story: &StoryInfo) -> Result<Story> {
+    let first_page_doc = get_page_document(story, 0).await?;
+    let story_id = get_story_id(&first_page_doc)?;
+    // TODO: get page count
+    let page_zero_story = get_page(&story.url, &story_id, 0).await?;
+    Err(anyhow!("No story parsed yet"))
+}
+
+async fn get_page_document(story: &StoryInfo, page: usize) -> Result<Html> {
+    let endpoint = format!("{}/{}", story.url, page);
+    let resp = send_request(&endpoint).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(anyhow!("Failed to get page {} content", page));
+    }
+    let text = resp.text().await.unwrap();
+    Ok(Html::parse_document(&text))
+}
+
+fn get_story_id(doc: &Html) -> Result<String> {
+    let selector = Selector::parse("img.roundcorner").unwrap();
+    let id = doc.select(&selector).find(|node| {
+        node.value().attr("src").map_or(false, |img_src| img_src != "")
+    }).map(|node| {
+        let img_src = node.value().attr("src").unwrap();
+        // img_src should be "/content/coverimage/{id}.{extension}?{magic_number}"
+        let img_name = img_src.split("/").skip(3).next().unwrap();
+        let (id, _) = img_name.split_once(".").unwrap();
+        id.to_uppercase()
+    }).unwrap();
+    Ok(id)
 }
