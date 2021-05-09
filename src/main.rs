@@ -3,6 +3,7 @@ extern crate lazy_static;
 extern crate tokio;
 
 use std::io::{stdin, stdout, Write};
+use std::process::exit;
 
 use anyhow::{anyhow, Context, Result};
 use fake_useragent::UserAgents;
@@ -27,11 +28,10 @@ async fn main() -> Result<()> {
     let about_page = get_about_page(&author_id).await?;
     let nickname = parse_nickname(&about_page)?;
 
-    println!("Let's see what stories does \"{}\" have...", { nickname });
+    println!("Let's see what stories does {}({}) have ...", nickname, author_id);
     let stories = parse_stories(&about_page)?;
-    for s in stories {
-        println!("{:?}", s);
-    }
+    let selected_story = ask_select_story(&stories)?;
+    println!("{:?}", selected_story);
 
     Ok(())
 }
@@ -92,4 +92,30 @@ fn parse_stories(about_page: &Html) -> Result<Vec<Story>> {
                 url,
             }
         }).collect())
+}
+
+fn ask_select_story(stories: &Vec<Story>) -> Result<&Story> {
+    println!("Which story do you want to read? Or enter `q` to exit");
+    for (i, story) in stories.iter().enumerate() {
+        println!("{}) {}", i + 1, story.title);
+    }
+    loop {
+        print!("> ");
+        Write::flush(&mut stdout())?;
+        let mut story_index_str = String::new();
+        stdin().read_line(&mut story_index_str)?;
+
+        let trim_story_index_str = story_index_str.trim();
+        match trim_story_index_str.parse::<usize>() {
+            Ok(i) if i <= stories.len() => {
+                return Ok(&stories[i - 1]);
+            }
+            _ => {
+                if trim_story_index_str == "q" {
+                    exit(1);
+                }
+                println!("Try again");
+            }
+        };
+    }
 }
