@@ -331,6 +331,7 @@ dependencies = [
  "lazy_static",
  "reqwest 0.11.3",
  "scraper",
+ "serde",
  "tokio 1.5.0",
 ]
 
@@ -1630,6 +1631,7 @@ dependencies = [
  "percent-encoding 2.1.0",
  "pin-project-lite",
  "serde",
+ "serde_json",
  "serde_urlencoded 0.7.0",
  "tokio 1.5.0",
  "tokio-native-tls",

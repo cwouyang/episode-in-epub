@@ -2,15 +2,20 @@
 extern crate lazy_static;
 extern crate tokio;
 
+use std::collections::HashMap;
 use std::io::{stdin, stdout, Write};
 use std::process::exit;
 
 use anyhow::{anyhow, Context, Result};
 use fake_useragent::UserAgents;
 use reqwest::{Client, redirect::Policy, Response};
+use reqwest::header::REFERER;
 use scraper::{Html, Selector};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 
 const BASE_URL: &str = "https://episode.cc";
+const GET_PAGE_URL: &str = "https://episode.cc/Reading/GetPage";
 
 lazy_static! {
     static ref CLIENT: Client = {
@@ -48,6 +53,15 @@ fn ask_author_id() -> Result<String> {
 async fn send_request(endpoint: &str) -> Result<Response> {
     Ok(CLIENT.get(endpoint).send()
         .await.with_context(|| format!("Failed to send request to {}", endpoint))?)
+}
+
+async fn post_request<T: DeserializeOwned>(endpoint: &str, form: &HashMap<&str, &str>, referer: &str) -> Result<T> {
+    Ok(CLIENT.post(endpoint).form(form).header(REFERER, referer).send()
+        .await
+        .with_context(|| format!("Failed to post request to {}", endpoint))?
+        .json::<T>()
+        .await?
+    )
 }
 
 async fn get_about_page(author_id: &str) -> Result<Html> {
@@ -159,4 +173,77 @@ fn get_story_id(doc: &Html) -> Result<String> {
         id.to_uppercase()
     }).unwrap();
     Ok(id)
+}
+
+#[derive(Deserialize, Debug)]
+struct GetPageResponse {
+    #[serde(rename = "FC")]
+    fc: String,
+    #[serde(rename = "FC1")]
+    fc1: String,
+    #[serde(rename = "FC2")]
+    fc2: String,
+    #[serde(rename = "BG")]
+    bg: String,
+    #[serde(rename = "VMOBISHIFT")]
+    vmobishift: String,
+    #[serde(rename = "PARABGOP")]
+    parabgop: String,
+    #[serde(rename = "IMAGESOURCE")]
+    imagesource: String,
+    #[serde(rename = "EMBEDIMGSOURCE")]
+    embedimgsource: String,
+    #[serde(rename = "PHOTOGRAPHER")]
+    photographer: String,
+    #[serde(rename = "DMMODEL")]
+    dmmodel: String,
+    #[serde(rename = "IDENT")]
+    ident: i32,
+    #[serde(rename = "HEIGHT")]
+    height: i32,
+    #[serde(rename = "HTMLBODY")]
+    htmlbody: String,
+    #[serde(rename = "TITLE")]
+    title: String,
+    #[serde(rename = "VRTPTITLE")]
+    vrtptitle: i32,
+    #[serde(rename = "PAGELOCK")]
+    pagelock: i32,
+    #[serde(rename = "PWHINT")]
+    pwhint: String,
+    #[serde(rename = "KEYINPUT")]
+    keyinput: i32,
+    #[serde(rename = "PAGEACCESSTYPE")]
+    pageaccesstype: i32,
+    #[serde(rename = "MyPRAISE")]
+    mypraise: i32,
+    #[serde(rename = "PRAISECOUNT")]
+    praisecount: i32,
+    #[serde(rename = "UID")]
+    uid: String,
+    #[serde(rename = "TODAYHITS")]
+    todayhits: String,
+    #[serde(rename = "TOTALHITS")]
+    totalhits: String,
+    #[serde(rename = "RATE")]
+    rate: String,
+    #[serde(rename = "COMMENTSIZE")]
+    commentsize: i32,
+    #[serde(rename = "GATHERST")]
+    gatherst: i32,
+    #[serde(rename = "PLUGINDATA")]
+    plugindata: String,
+    #[serde(rename = "StoryPWpass")]
+    story_pw_pass: bool,
+}
+
+async fn get_page(referer: &str, story_id: &str, page: usize) -> Result<GetPageResponse> {
+    let page_string = page.to_string();
+    let mut form = HashMap::new();
+    form.insert("SID", story_id);
+    form.insert("PID", &page_string);
+    form.insert("StoryPW", "");
+    form.insert("PagePW", "");
+    form.insert("CountHit", "true");
+    Ok(post_request::<GetPageResponse>(GET_PAGE_URL, &form, referer).await?)
 }
