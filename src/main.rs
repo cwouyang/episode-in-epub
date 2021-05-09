@@ -74,12 +74,12 @@ fn parse_nickname(about_page: &Html) -> Result<String> {
 }
 
 #[derive(Debug)]
-struct Story {
+struct StoryInfo {
     title: String,
     url: String,
 }
 
-fn parse_stories(about_page: &Html) -> Result<Vec<Story>> {
+fn parse_stories(about_page: &Html) -> Result<Vec<StoryInfo>> {
     let story_selector = Selector::parse("div.stystory").unwrap();
     Ok(about_page.select(&story_selector).map(|e|
         {
@@ -87,14 +87,14 @@ fn parse_stories(about_page: &Html) -> Result<Vec<Story>> {
             let relative_url = title_and_url_node.value().as_element().unwrap().attr("href").unwrap();
             let title = e.text().next().unwrap().to_string();
             let url = format!("{}{}", BASE_URL, relative_url);
-            Story {
+            StoryInfo {
                 title,
                 url,
             }
         }).collect())
 }
 
-fn ask_select_story(stories: &Vec<Story>) -> Result<&Story> {
+fn ask_select_story(stories: &Vec<StoryInfo>) -> Result<&StoryInfo> {
     println!("Which story do you want to read? Or enter `q` to exit");
     for (i, story) in stories.iter().enumerate() {
         println!("{}) {}", i + 1, story.title);
