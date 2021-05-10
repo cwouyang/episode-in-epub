@@ -4,6 +4,7 @@ extern crate tokio;
 
 use std::collections::HashMap;
 use std::io::{stdin, stdout, Write};
+use std::ops::Range;
 use std::process::exit;
 
 use anyhow::{anyhow, Context, Result};
@@ -145,6 +146,7 @@ struct Story(Vec<StoryPage>);
 async fn parse_story(story: &StoryInfo) -> Result<Story> {
     let first_page_doc = get_page_document(story, 0).await?;
     let story_id = get_story_id(&first_page_doc)?;
+    let page_range = get_page_range(&first_page_doc)?;
     // TODO: get page count
     let page_zero_story = get_page(&story.url, &story_id, 0).await?;
     Err(anyhow!("No story parsed yet"))
@@ -173,6 +175,19 @@ fn get_story_id(doc: &Html) -> Result<String> {
         id.to_uppercase()
     }).unwrap();
     Ok(id)
+}
+
+fn get_page_range(doc: &Html) -> Result<Range<usize>> {
+    let selector = Selector::parse("div[style=\"float:left\"]").unwrap();
+    for n in doc.select(&selector) {//.filter(|n| n.inner_html().contains("頁")) {
+        let inner_html = n.inner_html();
+        if inner_html.contains("頁") {
+            let (page_count_str, _) = inner_html.split_once(" ").unwrap();
+            let page_count = page_count_str.parse::<usize>()?;
+            return Ok(0..page_count);
+        }
+    }
+    Ok(0..1)
 }
 
 #[derive(Deserialize, Debug)]
