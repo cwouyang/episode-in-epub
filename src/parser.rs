@@ -120,6 +120,21 @@ async fn get_page_document(story_url: String, page: usize) -> Result<Html> {
 }
 
 fn get_story_id(doc: &Html) -> Result<String> {
+    let inner_html = doc.root_element().inner_html();
+    // find `SID:"{sid}"`
+    let sid_start_idx = inner_html.find("SID:\"");
+    match sid_start_idx {
+        Some(start_idx) => {
+            let start_idx = start_idx + 5;
+            let end_idx = inner_html[start_idx..].find("\"").unwrap() + start_idx;
+            let id = inner_html[start_idx..end_idx].to_string();
+            Ok(id)
+        }
+        None => get_story_id_by_cover_image(doc)
+    }
+}
+
+fn get_story_id_by_cover_image(doc: &Html) -> Result<String> {
     let selector = Selector::parse("img.roundcorner").unwrap();
     let id = doc
         .select(&selector)
@@ -136,6 +151,9 @@ fn get_story_id(doc: &Html) -> Result<String> {
             id.to_uppercase()
         })
         .unwrap();
+    if id == "DEFAULT" {
+        return Err(anyhow!("Failed to find story ID"));
+    }
     Ok(id)
 }
 
