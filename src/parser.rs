@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use anyhow::{anyhow, Context, Result};
 use fake_useragent::UserAgents;
+use futures::future::join_all;
 use reqwest::{Client, redirect::Policy};
 use reqwest::header::REFERER;
 use reqwest::Response;
@@ -83,8 +84,7 @@ pub fn parse_author_name(about_page: &Html) -> Result<String> {
 
 pub async fn parse_story_infos(about_page: &Html) -> Result<Vec<StoryInfo>> {
     let story_selector = Selector::parse("div.stystory").unwrap();
-    let mut story_infos = Vec::new();
-    for e in about_page.select(&story_selector) {
+    let (title_and_urls, get_first_page_futures): (Vec<_>, Vec<_>) = about_page.select(&story_selector).map(|e| {
         let title_and_url_node = e.first_child().unwrap();
         let relative_url = title_and_url_node
             .value()
@@ -94,15 +94,21 @@ pub async fn parse_story_infos(about_page: &Html) -> Result<Vec<StoryInfo>> {
             .unwrap();
         let title = e.text().next().unwrap().to_string();
         let url = format!("{}{}", BASE_URL, relative_url);
-        let first_page_doc = get_page_document(&url, 0).await?;
-        let id = get_story_id(&first_page_doc)?;
-        let page_range = get_page_range(&first_page_doc)?;
-        story_infos.push(StoryInfo { title, id, url, page_range });
-    }
-    Ok(story_infos)
+        let first_page_doc = get_page_document(url.clone(), 0);
+        ((title, url), first_page_doc)
+    })
+        .unzip();
+    join_all(get_first_page_futures).await.into_iter()
+        .zip(title_and_urls.into_iter())
+        .map(|(first_page_doc, (title, url))| {
+            let first_page_doc = first_page_doc?;
+            let id = get_story_id(&first_page_doc)?;
+            let page_range = get_page_range(&first_page_doc)?;
+            Ok(StoryInfo { title, id, url, page_range })
+        }).collect::<Result<Vec<StoryInfo>>>()
 }
 
-async fn get_page_document(story_url: &str, page: usize) -> Result<Html> {
+async fn get_page_document(story_url: String, page: usize) -> Result<Html> {
     let endpoint = format!("{}/{}", story_url, page);
     let resp = send_request(&endpoint).await?;
     let status = resp.status();
