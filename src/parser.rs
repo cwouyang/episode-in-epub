@@ -265,5 +265,22 @@ pub async fn download_cover_image(story_id: &str) -> Option<Vec<u8>> {
     if !response.status().is_success() {
         return None;
     }
-    response.bytes().await.map(|b| b.to_vec()).ok()
+    match response.bytes().await {
+        Ok(b) => {
+            if b.len() > 0 {
+                Some(b.to_vec())
+            } else {
+                let default_image_url = format!("{}/content/coverimage/default.story.cover.image.jpg", BASE_URL);
+                let response = reqwest::get(default_image_url).await.ok()?;
+                if !response.status().is_success() {
+                    None
+                } else {
+                    response.bytes().await.map(|b| b.to_vec()).ok()
+                }
+            }
+        }
+        Err(_) => {
+            None
+        }
+    }
 }
