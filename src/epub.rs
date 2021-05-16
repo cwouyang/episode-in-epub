@@ -81,7 +81,8 @@ fn sanitize_into_xhtml(html: &str) -> String {
     let mut result = String::with_capacity(html.len());
     for n in fragment.root_element().descendants().skip(1) {
         let v = n.value();
-        if v.as_element().map_or(false, |e| e.name() == "font" || e.name() == "b" || e.name() == "span") {
+        // drop theses tag
+        if v.as_element().map_or(false, |e| e.name() == "font" || e.name() == "b" || e.name() == "span" || e.name() == "a") {
             continue;
         }
         if v.is_element() {
