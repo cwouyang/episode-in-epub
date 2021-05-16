@@ -67,7 +67,7 @@ pub async fn get_about_page(author_id: &str) -> Result<Html> {
     Ok(Html::parse_document(&text))
 }
 
-pub fn parse_nickname(about_page: &Html) -> Result<String> {
+pub fn parse_author_name(about_page: &Html) -> Result<String> {
     let title_selector = Selector::parse("title").unwrap();
     let title_node = about_page.select(&title_selector).next().unwrap();
     title_node
@@ -78,10 +78,10 @@ pub fn parse_nickname(about_page: &Html) -> Result<String> {
             t.split_ascii_whitespace()
         })
         .map(|s| s.skip(1).next().unwrap().to_string())
-        .with_context(|| "Failed to parse nickname")
+        .with_context(|| "Failed to parse author name")
 }
 
-pub async fn parse_stories(about_page: &Html) -> Result<Vec<StoryInfo>> {
+pub async fn parse_story_infos(about_page: &Html) -> Result<Vec<StoryInfo>> {
     let story_selector = Selector::parse("div.stystory").unwrap();
     let mut story_infos = Vec::new();
     for e in about_page.select(&story_selector) {
@@ -100,22 +100,6 @@ pub async fn parse_stories(about_page: &Html) -> Result<Vec<StoryInfo>> {
         story_infos.push(StoryInfo { title, id, url, page_range });
     }
     Ok(story_infos)
-}
-
-pub async fn parse_story(story: &StoryInfo) -> Result<Vec<GetPageResponse>> {
-    let mut page_responses = Vec::new();
-    for page in story.page_range.start..story.page_range.end {
-        match get_page(&story.url, &story.id, page).await {
-            Ok(page_response) => {
-                page_responses.push(page_response);
-            }
-            Err(_) => {
-                println!("Failed to download page {}. Skip following pages.", page);
-                break;
-            }
-        }
-    }
-    Ok(page_responses)
 }
 
 async fn get_page_document(story_url: &str, page: usize) -> Result<Html> {
@@ -152,7 +136,6 @@ fn get_story_id(doc: &Html) -> Result<String> {
 fn get_page_range(doc: &Html) -> Result<Range<usize>> {
     let selector = Selector::parse("div[style=\"float:left\"]").unwrap();
     for n in doc.select(&selector) {
-        //.filter(|n| n.inner_html().contains("頁")) {
         let inner_html = n.inner_html();
         if inner_html.contains("頁") {
             let (page_count_str, _) = inner_html.split_once(" ").unwrap();
@@ -225,7 +208,23 @@ pub struct GetPageResponse {
     story_pw_pass: bool,
 }
 
-async fn get_page(referer: &str, story_id: &str, page: usize) -> Result<GetPageResponse> {
+pub async fn parse_story(story: &StoryInfo) -> Result<Vec<GetPageResponse>> {
+    let mut page_responses = Vec::new();
+    for page in story.page_range.start..story.page_range.end {
+        match post_get_page_api(&story.url, &story.id, page).await {
+            Ok(page_response) => {
+                page_responses.push(page_response);
+            }
+            Err(_) => {
+                println!("Failed to download page {}. Skip following pages and continue", page);
+                break;
+            }
+        }
+    }
+    Ok(page_responses)
+}
+
+async fn post_get_page_api(referer: &str, story_id: &str, page: usize) -> Result<GetPageResponse> {
     let page_string = page.to_string();
     let mut form = HashMap::new();
     form.insert("SID", story_id);

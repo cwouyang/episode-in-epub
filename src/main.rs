@@ -8,7 +8,7 @@ use std::process::exit;
 use anyhow::Result;
 
 use crate::epub::create_epub_file;
-use crate::parser::{download_cover_image, get_about_page, parse_nickname, parse_stories, parse_story, StoryInfo};
+use crate::parser::{download_cover_image, get_about_page, parse_author_name, parse_story_infos, parse_story, StoryInfo};
 
 mod parser;
 mod epub;
@@ -17,19 +17,19 @@ mod epub;
 async fn main() -> Result<()> {
     let author_id = ask_author_id()?;
     let about_page = get_about_page(&author_id).await?;
-    let nickname = parse_nickname(&about_page)?;
+    let author_name = parse_author_name(&about_page)?;
 
     println!(
         "Let's see what stories does {}({}) have ...",
-        nickname, author_id
+        author_name, author_id
     );
-    let stories = parse_stories(&about_page).await?;
-    let selected_story = ask_select_story(&stories)?;
+    let story_infos = parse_story_infos(&about_page).await?;
+    let selected_story = ask_select_story(&story_infos)?;
 
     let story_pages = parse_story(selected_story).await?;
     let cover_image = download_cover_image(&selected_story.id).await;
     create_epub_file(
-        &nickname,
+        &author_name,
         &selected_story.title,
         cover_image,
         story_pages,
@@ -45,7 +45,6 @@ fn ask_author_id() -> Result<String> {
     stdin().read_line(&mut author_id)?;
     Ok(author_id.trim().to_string())
 }
-
 
 fn ask_select_story(stories: &Vec<StoryInfo>) -> Result<&StoryInfo> {
     println!("Which story do you want to read? Or enter `q` to exit");

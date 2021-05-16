@@ -15,6 +15,18 @@ pub fn create_epub_file(
     story_pages: Vec<GetPageResponse>,
 ) -> Result<()> {
     let mut builder = EpubBuilder::new(ZipLibrary::new().unwrap()).unwrap();
+    add_metadata(&mut builder, author, title);
+    add_cover_image(&mut builder, cover_image);
+    add_contents(&mut builder, story_pages);
+
+    let mut cwd = current_dir()?;
+    cwd.push(format!("{}.epub", title));
+    let epub_path = File::create(cwd)?;
+    builder.generate(epub_path).unwrap();
+    Ok(())
+}
+
+fn add_metadata(builder: &mut EpubBuilder<ZipLibrary>, author: &str, title: &str) {
     builder
         .epub_version(V30)
         .metadata("author", author)
@@ -26,11 +38,17 @@ pub fn create_epub_file(
         .metadata("generator", "episode-in-epub")
         .unwrap()
         .inline_toc();
+}
+
+fn add_cover_image(builder: &mut EpubBuilder<ZipLibrary>, cover_image: Option<Vec<u8>>) {
     if let Some(cover_image_file) = cover_image {
         builder
             .add_cover_image("data/cover_image.jpg", cover_image_file.as_slice(), "image/jpeg")
             .unwrap();
     }
+}
+
+fn add_contents(builder: &mut EpubBuilder<ZipLibrary>, story_pages: Vec<GetPageResponse>) {
     for (page, story_page) in story_pages.into_iter().enumerate() {
         let xhtml_file_name = format!("{}.xhtml", page);
         let title = story_page.title;
@@ -39,12 +57,6 @@ pub fn create_epub_file(
         content = content.title(title);
         let _ = builder.add_content(content);
     }
-
-    let mut cwd = current_dir()?;
-    cwd.push(format!("{}.epub", title));
-    let epub_path = File::create(cwd)?;
-    builder.generate(epub_path).unwrap();
-    Ok(())
 }
 
 fn surround_with_xhtml_header(title: &str, body_html: &str) -> String {
@@ -58,12 +70,12 @@ fn surround_with_xhtml_header(title: &str, body_html: &str) -> String {
             r#"<link rel="stylesheet" type="text/css" href="stylesheet.css" />
 </head>
 <body>"#,
-            sanitize_to_meet_xhtml(body_html),
+            sanitize_into_xhtml(body_html),
             r#"</body>
 </html>"#)
 }
 
-fn sanitize_to_meet_xhtml(html: &str) -> String {
+fn sanitize_into_xhtml(html: &str) -> String {
     // ensure all tag attributes are enclosed with ""
     let fragment = Html::parse_fragment(html);
     let mut result = String::with_capacity(html.len());
