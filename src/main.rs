@@ -2,22 +2,22 @@
 extern crate lazy_static;
 extern crate tokio;
 
-use anyhow::{anyhow, Context, Result};
-use epub_builder::EpubVersion::V30;
-use epub_builder::{EpubBuilder, EpubContent, ZipLibrary};
-use fake_useragent::UserAgents;
-use reqwest::header::REFERER;
-use reqwest::{redirect::Policy, Client, Response};
-use scraper::{Html, Selector};
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::env::current_dir;
 use std::fs::File;
 use std::io::{stdin, stdout, Write};
 use std::ops::Range;
 use std::process::exit;
-use temp_file::TempFile;
+
+use anyhow::{anyhow, Context, Result};
+use epub_builder::{EpubBuilder, EpubContent, ZipLibrary};
+use epub_builder::EpubVersion::V30;
+use fake_useragent::UserAgents;
+use reqwest::{Client, redirect::Policy, Response};
+use reqwest::header::REFERER;
+use scraper::{Html, Selector};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 
 const BASE_URL: &str = "https://episode.cc";
 const GET_PAGE_ENDPOINT: &str = "https://episode.cc/Reading/GetPage";
@@ -43,13 +43,14 @@ async fn main() -> Result<()> {
         "Let's see what stories does {}({}) have ...",
         nickname, author_id
     );
-    let stories = parse_stories(&about_page)?;
+    let stories = parse_stories(&about_page).await?;
     let selected_story = ask_select_story(&stories)?;
+
     let story_pages = parse_story(selected_story).await?;
-    let cover_image = download_cover_image(&nickname).await;
+    let cover_image = download_cover_image(&selected_story.id).await;
     create_epub_file(
         &nickname,
-        &story_pages[0].title.clone(),
+        &selected_story.title,
         cover_image,
         story_pages,
     )?;
@@ -117,26 +118,30 @@ fn parse_nickname(about_page: &Html) -> Result<String> {
 #[derive(Debug)]
 struct StoryInfo {
     title: String,
+    id: String,
     url: String,
+    page_range: Range<usize>,
 }
 
-fn parse_stories(about_page: &Html) -> Result<Vec<StoryInfo>> {
+async fn parse_stories(about_page: &Html) -> Result<Vec<StoryInfo>> {
     let story_selector = Selector::parse("div.stystory").unwrap();
-    Ok(about_page
-        .select(&story_selector)
-        .map(|e| {
-            let title_and_url_node = e.first_child().unwrap();
-            let relative_url = title_and_url_node
-                .value()
-                .as_element()
-                .unwrap()
-                .attr("href")
-                .unwrap();
-            let title = e.text().next().unwrap().to_string();
-            let url = format!("{}{}", BASE_URL, relative_url);
-            StoryInfo { title, url }
-        })
-        .collect())
+    let mut story_infos = Vec::new();
+    for e in about_page.select(&story_selector) {
+        let title_and_url_node = e.first_child().unwrap();
+        let relative_url = title_and_url_node
+            .value()
+            .as_element()
+            .unwrap()
+            .attr("href")
+            .unwrap();
+        let title = e.text().next().unwrap().to_string();
+        let url = format!("{}{}", BASE_URL, relative_url);
+        let first_page_doc = get_page_document(&url, 0).await?;
+        let id = get_story_id(&first_page_doc)?;
+        let page_range = get_page_range(&first_page_doc)?;
+        story_infos.push(StoryInfo { title, id, url, page_range });
+    }
+    Ok(story_infos)
 }
 
 fn ask_select_story(stories: &Vec<StoryInfo>) -> Result<&StoryInfo> {
@@ -165,37 +170,10 @@ fn ask_select_story(stories: &Vec<StoryInfo>) -> Result<&StoryInfo> {
     }
 }
 
-// struct StoryPage {
-//     page: usize,
-//     content: String,
-//     background: String,
-// }
-//
-// impl StoryPage {
-//     pub fn new(page: usize, page_response: GetPageResponse) -> Self {
-//         StoryPage {
-//             page,
-//             content: Self::extract_content(&page_response.htmlbody),
-//             background: page_response.bg,
-//         }
-//     }
-//
-//     fn extract_content(content_html: &str) -> String {
-//         println!("{}", content_html);
-//         content_html.to_string()
-//     }
-// }
-//
-// struct Story(Vec<StoryPage>);
-
 async fn parse_story(story: &StoryInfo) -> Result<Vec<GetPageResponse>> {
-    let first_page_doc = get_page_document(story, 0).await?;
-    let story_id = get_story_id(&first_page_doc)?;
-    let page_range = get_page_range(&first_page_doc)?;
-
     let mut page_responses = Vec::new();
-    for page in page_range {
-        match get_page(&story.url, &story_id, page).await {
+    for page in story.page_range.start..story.page_range.end {
+        match get_page(&story.url, &story.id, page).await {
             Ok(page_response) => {
                 page_responses.push(page_response);
             }
@@ -208,8 +186,8 @@ async fn parse_story(story: &StoryInfo) -> Result<Vec<GetPageResponse>> {
     Ok(page_responses)
 }
 
-async fn get_page_document(story: &StoryInfo, page: usize) -> Result<Html> {
-    let endpoint = format!("{}/{}", story.url, page);
+async fn get_page_document(story_url: &str, page: usize) -> Result<Html> {
+    let endpoint = format!("{}/{}", story_url, page);
     let resp = send_request(&endpoint).await?;
     let status = resp.status();
     if !status.is_success() {
@@ -326,22 +304,19 @@ async fn get_page(referer: &str, story_id: &str, page: usize) -> Result<GetPageR
     Ok(post_request::<GetPageResponse>(GET_PAGE_ENDPOINT, &form, referer).await?)
 }
 
-async fn download_cover_image(story_id: &str) -> Option<TempFile> {
-    let mut image = TempFile::new().unwrap();
-    let image_url = format!("{}/{}.jpg", BASE_URL, story_id);
+async fn download_cover_image(story_id: &str) -> Option<Vec<u8>> {
+    let image_url = format!("{}/content/coverimage/{}.jpg", BASE_URL, story_id);
     let response = reqwest::get(image_url).await.ok()?;
     if !response.status().is_success() {
         return None;
     }
-    let content = response.text().await.ok()?;
-    image = image.with_contents(content.as_bytes()).ok()?;
-    Some(image)
+    response.bytes().await.map(|b| b.to_vec()).ok()
 }
 
 fn create_epub_file(
     author: &str,
     title: &str,
-    cover_image: Option<TempFile>,
+    cover_image: Option<Vec<u8>>,
     story_pages: Vec<GetPageResponse>,
 ) -> Result<()> {
     let mut builder = EpubBuilder::new(ZipLibrary::new().unwrap()).unwrap();
@@ -357,16 +332,17 @@ fn create_epub_file(
         .unwrap()
         .inline_toc();
     if let Some(cover_image_file) = cover_image {
-        let file = File::open(cover_image_file.path())?;
         builder
-            .add_cover_image("data/cover_image.jpg", file, "image/jpeg")
+            .add_cover_image("data/cover_image.jpg", cover_image_file.as_slice(), "image/jpeg")
             .unwrap();
     }
     for (page, story_page) in story_pages.into_iter().enumerate() {
-        let xhtml_file_name = format!("Page{}.xhtml", page);
-        let mut content = EpubContent::new(xhtml_file_name, story_page.htmlbody.as_bytes());
-        content = content.title(story_page.title);
-        builder.add_content(content);
+        let xhtml_file_name = format!("{}.xhtml", page);
+        let title = story_page.title;
+        let xhtml = surround_with_xhtml_header(&title, &story_page.htmlbody);
+        let mut content = EpubContent::new(xhtml_file_name, xhtml.as_bytes());
+        content = content.title(title);
+        let _ = builder.add_content(content);
     }
 
     let mut cwd = current_dir()?;
@@ -374,4 +350,45 @@ fn create_epub_file(
     let epub_path = File::create(cwd)?;
     builder.generate(epub_path).unwrap();
     Ok(())
+}
+
+fn surround_with_xhtml_header(title: &str, body_html: &str) -> String {
+    format!("{}<title>{}</title>{}\n{}\n{}", r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <meta charset = "utf-8" />
+  <meta name="generator" content="episode-in-epub" />"#,
+            title,
+            r#"<link rel="stylesheet" type="text/css" href="stylesheet.css" />
+</head>
+<body>"#,
+            sanitize_to_meet_xhtml(body_html),
+            r#"</body>
+</html>"#)
+}
+
+fn sanitize_to_meet_xhtml(html: &str) -> String {
+    // ensure all tag attributes are enclosed with ""
+    let fragment = Html::parse_fragment(html);
+    let mut result = String::with_capacity(html.len());
+    for n in fragment.root_element().descendants().skip(1) {
+        let v = n.value();
+        if v.as_element().map_or(false, |e| e.name() == "font" || e.name() == "b" || e.name() == "span") {
+            continue;
+        }
+        if v.is_element() {
+            let element = v.as_element().unwrap();
+            if element.name() == "br" {
+                result.push_str("<br />");
+            } else {
+                result.push_str(&*format!("{:?}", element));
+            }
+        } else if v.is_text() {
+            result.push_str(&*format!("{}", v.as_text().unwrap().text));
+        } else {
+            unreachable!();
+        }
+    }
+    result
 }

@@ -376,7 +376,6 @@ dependencies = [
  "reqwest 0.11.3",
  "scraper",
  "serde",
- "temp-file",
  "tokio 1.5.0",
 ]
 
@@ -2127,12 +2126,6 @@ dependencies = [
  "syn 1.0.72",
  "unicode-xid 0.2.2",
 ]
-
-[[package]]
-name = "temp-file"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee71da36831f42b12ba5fa8bf3fc7a54305f9091f1fcb2409a80ad29aaf06152"
 
 [[package]]
 name = "tempdir"
